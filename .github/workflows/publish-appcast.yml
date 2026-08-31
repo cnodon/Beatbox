@@ -24,7 +24,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TAG_NAME: ${{ inputs.tag }}
       SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
-      SPARKLE_TOOLS_DIR: ${{ runner.temp }}/sparkle-tools
+      SPARKLE_TOOLS_DIR: ${{ github.workspace }}/.build/sparkle-tools
 
     steps:
       - name: Validate the draft release
