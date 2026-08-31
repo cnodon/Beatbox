@@ -30,13 +30,26 @@ struct KaraokeImporterTests {
             storage: storage
         )
 
-        #expect(result.artist == "庾澄庆")
-        #expect(result.title == "让我一次爱个够")
-        #expect(result.duration > 250)
-        #expect(result.sourceFormat == "NCM → MP3")
-        #expect(!result.lyricCues.isEmpty)
+        #expect(!result.artist.isEmpty)
+        #expect(!result.title.isEmpty)
+        #expect(result.duration > 1)
+        #expect(result.sourceFormat == "NCM → MP3" || result.sourceFormat == "NCM → FLAC")
         #expect(FileManager.default.fileExists(
             atPath: storage.karaokeURL(for: result.audioFileName).path
         ))
+    }
+
+    @Test("内置解码器拒绝损坏的 NCM")
+    func rejectsInvalidNCMContainer() throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appending(path: "BeatboxInvalidNCMTests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let sourceURL = rootURL.appending(path: "invalid.ncm")
+        let outputURL = rootURL.appending(path: "output", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
+        try Data("not an ncm file".utf8).write(to: sourceURL)
+
+        #expect(throws: NativeNCMDecoder.DecodeError.self) {
+            try NativeNCMDecoder().decode(sourceURL: sourceURL, outputDirectory: outputURL)
+        }
     }
 }

@@ -2,8 +2,13 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppModel.self) private var appModel
+    @ObservedObject private var softwareUpdates: SoftwareUpdateController
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @FocusedValue(\.beatboxTextEditing) private var isTextEditing
+
+    init(softwareUpdates: SoftwareUpdateController) {
+        self.softwareUpdates = softwareUpdates
+    }
 
     var body: some View {
         @Bindable var appModel = appModel
@@ -98,6 +103,17 @@ struct ContentView: View {
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .principal) {
             SourcePicker()
+        }
+
+        ToolbarItem(placement: .secondaryAction) {
+            Button {
+                softwareUpdates.checkForUpdates()
+            } label: {
+                Label("检查更新", systemImage: "arrow.triangle.2.circlepath")
+            }
+            .disabled(!softwareUpdates.canCheckForUpdates)
+            .help("检查 Beatbox 更新")
+            .accessibilityLabel("检查软件更新")
         }
 
         if appModel.capture.state.isCapturing {

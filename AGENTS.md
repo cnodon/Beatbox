@@ -57,7 +57,7 @@ Beatbox 是一款纯 Swift、macOS 专属的录音与录屏软件。首要目标
 ### User-approved experiment: KTV
 
 - KTV 作为独立本地歌曲库存在，不改变录音资料库的文件安全与单会话约束。
-- 可导入标准音频，或调用用户通过 Homebrew 安装的 MIT-licensed `ncmdump` 转换用户明确选择的 NCM；永远保留原 NCM，不传递 `--remove`。
+- 可导入标准音频，或使用内置 Swift/CommonCrypto 流式解码器转换用户明确选择的 NCM；永远保留原 NCM，不依赖或执行包外的 Homebrew 工具。
 - 同名 LRC 用于逐行歌词；跟唱会话播放歌曲并通过现有 capture coordinator 持续保存麦克风人声。
 - 首版不做人声分离、评分、自动混音或联网获取歌词；界面必须明确标注原唱音频与干声录制边界。
 

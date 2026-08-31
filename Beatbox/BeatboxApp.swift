@@ -29,7 +29,7 @@ struct BeatboxApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(softwareUpdates: softwareUpdates)
                 .environment(appModel)
                 .modelContainer(modelContainer)
                 .task {
