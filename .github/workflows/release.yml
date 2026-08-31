@@ -119,17 +119,17 @@ jobs:
 
       - name: Build, sign, notarize, and staple
         id: build
-        shell: zsh
+        shell: /bin/zsh {0}
         run: scripts/build-signed-release.sh
 
       - name: Fetch verified Sparkle tools
         id: sparkle
-        shell: zsh
+        shell: /bin/zsh {0}
         run: scripts/fetch-sparkle-tools.sh
 
       - name: Generate signed Sparkle appcast
         id: appcast
-        shell: zsh
+        shell: /bin/zsh {0}
         env:
           RELEASE_ARCHIVE: ${{ steps.build.outputs.release_archive }}
           GENERATE_APPCAST_PATH: ${{ steps.sparkle.outputs.generate_appcast_path }}

@@ -66,11 +66,11 @@ jobs:
 
       - name: Fetch verified Sparkle tools
         id: sparkle
-        shell: zsh
+        shell: /bin/zsh {0}
         run: scripts/fetch-sparkle-tools.sh
 
       - name: Generate and verify signed appcast
-        shell: zsh
+        shell: /bin/zsh {0}
         env:
           GENERATE_APPCAST_PATH: ${{ steps.sparkle.outputs.generate_appcast_path }}
           SIGN_UPDATE_PATH: ${{ steps.sparkle.outputs.sign_update_path }}
