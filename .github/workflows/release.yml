@@ -1,0 +1,195 @@
+name: Release Beatbox
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vMAJOR.MINOR.PATCH tag to build
+        required: true
+        type: string
+      publish:
+        description: Publish a GitHub Release after validation
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Sign, notarize, and publish
+    runs-on: macos-26
+    environment: release
+    timeout-minutes: 45
+    env:
+      TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      OUTPUT_DIR: ${{ github.workspace }}/.build/release
+      SPARKLE_TOOLS_DIR: ${{ runner.temp }}/sparkle-tools
+      DEVELOPMENT_TEAM: ${{ secrets.APPLE_DEVELOPMENT_TEAM }}
+      SIGNING_IDENTITY: ${{ secrets.DEVELOPER_ID_APPLICATION }}
+      MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      APPLE_NOTARY_KEY_P8_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+      NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+      NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+      SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+
+    steps:
+      - name: Check out the tagged revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate tag and release secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must use vMAJOR.MINOR.PATCH." >&2
+            exit 64
+          fi
+          git describe --tags --exact-match HEAD | grep -Fqx "$TAG_NAME"
+
+          required_secrets=(
+            DEVELOPMENT_TEAM
+            SIGNING_IDENTITY
+            MACOS_CERTIFICATE_P12_BASE64
+            MACOS_CERTIFICATE_PASSWORD
+            APPLE_NOTARY_KEY_P8_BASE64
+            NOTARY_KEY_ID
+            NOTARY_ISSUER_ID
+            SPARKLE_EDDSA_PRIVATE_KEY
+          )
+          for secret_name in "${required_secrets[@]}"; do
+            if [[ -z "${!secret_name:-}" ]]; then
+              echo "Missing GitHub release secret: $secret_name" >&2
+              exit 64
+            fi
+          done
+
+          echo "RELEASE_VERSION=${TAG_NAME#v}" >> "$GITHUB_ENV"
+          echo "RELEASE_BUILD_NUMBER=$(git rev-list --count HEAD)" >> "$GITHUB_ENV"
+
+      - name: Import Developer ID certificate
+        shell: bash
+        env:
+          KEYCHAIN_PATH: ${{ runner.temp }}/beatbox-signing.keychain-db
+          CERTIFICATE_PATH: ${{ runner.temp }}/developer-id.p12
+        run: |
+          set -euo pipefail
+          keychain_password=$(openssl rand -hex 24)
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | /usr/bin/base64 --decode > "$CERTIFICATE_PATH"
+
+          security create-keychain -p "$keychain_password" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$keychain_password" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$keychain_password" \
+            "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
+
+      - name: Materialize App Store Connect API key
+        shell: bash
+        env:
+          NOTARY_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+        run: |
+          set -euo pipefail
+          printf '%s' "$APPLE_NOTARY_KEY_P8_BASE64" | /usr/bin/base64 --decode > "$NOTARY_KEY_PATH"
+          chmod 600 "$NOTARY_KEY_PATH"
+          echo "NOTARY_KEY_PATH=$NOTARY_KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Build, sign, notarize, and staple
+        id: build
+        shell: zsh
+        run: scripts/build-signed-release.sh
+
+      - name: Fetch verified Sparkle tools
+        id: sparkle
+        shell: zsh
+        run: scripts/fetch-sparkle-tools.sh
+
+      - name: Generate signed Sparkle appcast
+        id: appcast
+        shell: zsh
+        env:
+          RELEASE_ARCHIVE: ${{ steps.build.outputs.release_archive }}
+          GENERATE_APPCAST_PATH: ${{ steps.sparkle.outputs.generate_appcast_path }}
+          SIGN_UPDATE_PATH: ${{ steps.sparkle.outputs.sign_update_path }}
+          DOWNLOAD_URL_PREFIX: https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/
+          RELEASE_PAGE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ env.TAG_NAME }}
+          APPCAST_OUTPUT: ${{ env.OUTPUT_DIR }}/appcast.xml
+        run: scripts/generate-appcast.sh
+
+      - name: Upload manual-run validation artifacts
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.publish }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: Beatbox-${{ env.RELEASE_VERSION }}-release-candidate
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            ${{ steps.build.outputs.release_archive }}
+            ${{ steps.build.outputs.checksum_path }}
+            ${{ steps.build.outputs.dsym_archive }}
+            ${{ steps.appcast.outputs.appcast_path }}
+
+      - name: Publish GitHub Release
+        if: ${{ github.event_name == 'push' || inputs.publish }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ARCHIVE: ${{ steps.build.outputs.release_archive }}
+          CHECKSUM_PATH: ${{ steps.build.outputs.checksum_path }}
+          DSYM_ARCHIVE: ${{ steps.build.outputs.dsym_archive }}
+          APPCAST_PATH: ${{ steps.appcast.outputs.appcast_path }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "A GitHub Release already exists for $TAG_NAME; refusing to overwrite it." >&2
+            exit 73
+          fi
+
+          assets=(
+            "$RELEASE_ARCHIVE#Beatbox ${RELEASE_VERSION}"
+            "$CHECKSUM_PATH#SHA-256 checksum"
+            "$APPCAST_PATH#Sparkle appcast"
+          )
+          if [[ -f "$DSYM_ARCHIVE" ]]; then
+            assets+=("$DSYM_ARCHIVE#Debug symbols")
+          fi
+
+          gh release create "$TAG_NAME" "${assets[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --generate-notes \
+            --title "Beatbox ${RELEASE_VERSION}"
+
+      - name: Remove temporary signing material
+        if: always()
+        shell: bash
+        env:
+          KEYCHAIN_PATH: ${{ runner.temp }}/beatbox-signing.keychain-db
+          CERTIFICATE_PATH: ${{ runner.temp }}/developer-id.p12
+          NOTARY_KEY_PATH: ${{ runner.temp }}/AuthKey.p8
+        run: |
+          security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
+          /bin/rm -f -- "$CERTIFICATE_PATH" "$NOTARY_KEY_PATH"

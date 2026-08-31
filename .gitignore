@@ -1,0 +1,28 @@
+.DS_Store
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.dSYM
+*.dmg
+*.zip
+
+# Local credentials and signing material
+.env
+.env.*
+!.env.example
+*.p12
+*.cer
+*.provisionprofile
+AuthKey_*.p8
+
+# Local tooling output
+tmp/
+output/
+
+# Rejected local brand explorations; the selected master is Brand/BeatboxIcon-final.png
+Brand/Concepts/
+Brand/BeatboxIcon-master.png
+Brand/BeatboxIcon-v2.png
+Brand/BeatboxIcon-v3.png
+Brand/BeatboxIcon-v3.svg
