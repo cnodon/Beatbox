@@ -233,6 +233,8 @@ workflow 运行在名为 `release` 的 GitHub Environment 中，需要配置以�
 
 正式 Release 包含 `Beatbox-<version>.zip`、对应 `.sha256`、`appcast.xml`，以及存在时的 dSYM zip。发行说明由 GitHub 根据 [`.github/release.yml`](.github/release.yml) 的分类生成。workflow 拒绝覆盖同一 tag 已存在的 Release；需要修复时应发布新版本，而不是替换旧二进制。
 
+如果发行包已在受信任的 Mac 上完成 Developer ID 签名与 Apple 公证，可先把包上传到草稿 Release，再手动运行 “Publish Appcast for Existing Release”。该 workflow 只读取加密的 `SPARKLE_EDDSA_PRIVATE_KEY`，为现有 zip 生成并验证 appcast；成功后附加 `appcast.xml` 并将草稿公开。它不会重新签名、替换或跳过公证发行包。
+
 发布后必须从上一个公开版本实际执行一次“检查更新 → 下载 → 验证 → 安装 → 重启”，并确认原有录音资料库仍可读取。
 
 ## 已知限制

@@ -1,0 +1,93 @@
+name: Publish Appcast for Existing Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Draft release tag in vMAJOR.MINOR.PATCH format
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-appcast-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Sign appcast and publish draft
+    runs-on: macos-26
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG_NAME: ${{ inputs.tag }}
+      SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+      SPARKLE_TOOLS_DIR: ${{ runner.temp }}/sparkle-tools
+
+    steps:
+      - name: Validate the draft release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tags must use vMAJOR.MINOR.PATCH." >&2
+            exit 64
+          fi
+          if [[ -z "$SPARKLE_EDDSA_PRIVATE_KEY" ]]; then
+            echo "Missing GitHub release secret: SPARKLE_EDDSA_PRIVATE_KEY" >&2
+            exit 64
+          fi
+          if [[ "$(gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" != true ]]; then
+            echo "The release must exist and still be a draft." >&2
+            exit 73
+          fi
+          echo "RELEASE_VERSION=${TAG_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Check out the tagged revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+
+      - name: Download the notarized release archive
+        shell: bash
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/release
+        run: |
+          set -euo pipefail
+          mkdir -p "$RELEASE_DIR"
+          gh release download "$TAG_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "Beatbox-${RELEASE_VERSION}.zip" \
+            --dir "$RELEASE_DIR"
+          echo "RELEASE_ARCHIVE=$RELEASE_DIR/Beatbox-${RELEASE_VERSION}.zip" >> "$GITHUB_ENV"
+
+      - name: Fetch verified Sparkle tools
+        id: sparkle
+        shell: zsh
+        run: scripts/fetch-sparkle-tools.sh
+
+      - name: Generate and verify signed appcast
+        shell: zsh
+        env:
+          GENERATE_APPCAST_PATH: ${{ steps.sparkle.outputs.generate_appcast_path }}
+          SIGN_UPDATE_PATH: ${{ steps.sparkle.outputs.sign_update_path }}
+          DOWNLOAD_URL_PREFIX: https://github.com/${{ github.repository }}/releases/download/${{ env.TAG_NAME }}/
+          RELEASE_PAGE_URL: https://github.com/${{ github.repository }}/releases/tag/${{ env.TAG_NAME }}
+          APPCAST_OUTPUT: ${{ runner.temp }}/release/appcast.xml
+        run: scripts/generate-appcast.sh
+
+      - name: Attach appcast and publish release
+        shell: bash
+        env:
+          APPCAST_PATH: ${{ runner.temp }}/release/appcast.xml
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG_NAME" "$APPCAST_PATH#Sparkle appcast" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+          gh release edit "$TAG_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft=false
