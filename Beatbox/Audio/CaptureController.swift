@@ -163,6 +163,10 @@ final class CaptureController {
                 throw CaptureFailure.sourceUnavailable
             }
 
+            logger.info(
+                "Preparing audio capture: \(inputFormat.sampleRate, privacy: .public) Hz, \(inputFormat.channelCount, privacy: .public) channel(s), monitoring \(monitorMicrophone, privacy: .public)"
+            )
+
             let settings = Self.audioFileSettings(
                 sampleRate: inputFormat.sampleRate,
                 channelCount: inputFormat.channelCount

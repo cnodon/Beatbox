@@ -494,6 +494,7 @@ final class AppModel {
             userMessage = "演唱已保存到录音资料库"
             return true
         } catch let failure as CaptureFailure {
+            karaokePlayback.stop()
             karaokeSessionState = .failed(
                 songID: song.id,
                 message: "\(failure.title)：\(failure.recoverySuggestion)"
@@ -501,6 +502,7 @@ final class AppModel {
             userMessage = "\(failure.title)：\(failure.recoverySuggestion)"
             return false
         } catch {
+            karaokePlayback.stop()
             modelContext.rollback()
             if let completedResult {
                 _ = preserveCompletedFileForRecovery(completedResult, mode: .audio)
@@ -1117,23 +1119,12 @@ final class AppModel {
     }
 
     private func synchronizeKaraokeSession(with captureState: CaptureState) {
-        guard let songID = karaokeSessionState.songID else { return }
-        switch captureState {
-        case let .recording(takeID):
-            karaokeSessionState = .recording(songID: songID, takeID: takeID)
-        case let .paused(takeID):
-            karaokeSessionState = .paused(songID: songID, takeID: takeID)
-        case let .finalizing(takeID):
-            karaokeSessionState = .finalizing(songID: songID, takeID: takeID)
-        case let .failed(failure):
-            karaokePlayback.pause()
-            karaokeSessionState = .failed(
-                songID: songID,
-                message: "\(failure.title)：\(failure.recoverySuggestion)"
-            )
-        default:
-            break
+        let synchronizedState = karaokeSessionState.synchronized(with: captureState)
+        guard synchronizedState != karaokeSessionState else { return }
+        if case .failed = synchronizedState {
+            karaokePlayback.stop()
         }
+        karaokeSessionState = synchronizedState
     }
 
 }

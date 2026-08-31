@@ -59,8 +59,9 @@ struct KaraokeDetailView: View {
             KaraokeStatusPill(title: "已暂停", systemImage: "pause.circle.fill", tint: .orange)
         case .finalizing:
             KaraokeStatusPill(title: "正在保存", systemImage: "externaldrive.fill.badge.checkmark", tint: .secondary)
-        case .failed:
+        case let .failed(_, message):
             KaraokeStatusPill(title: "跟唱失败", systemImage: "exclamationmark.triangle.fill", tint: .orange)
+                .help(message)
         default:
             KaraokeStatusPill(title: "可以开始跟唱", systemImage: "checkmark.circle", tint: .secondary)
         }
@@ -93,7 +94,23 @@ struct KaraokeDetailView: View {
                 .frame(minHeight: 48)
                 .accessibilityLabel("下一句歌词")
 
-            if isActiveSession {
+            if let failureMessage = sessionStateForSong.failureMessage {
+                VStack(spacing: 10) {
+                    Label(failureMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 620)
+
+                    Button {
+                        Task { await appModel.startKaraokeSession(for: song) }
+                    } label: {
+                        Label("重新尝试跟唱", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!appModel.canStartKaraokeSession)
+                }
+            } else if isActiveSession {
                 WaveformView(samples: appModel.capture.liveWaveformSamples, activeColor: .red)
                     .frame(maxWidth: 560, maxHeight: 58)
                     .accessibilityHidden(true)

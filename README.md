@@ -140,7 +140,7 @@ unsigned build 适合编译与自动化测试，不代表麦克风、ScreenCaptu
 ```sh
 DEVELOPMENT_TEAM="YOUR_TEAM_ID" \
 SIGNING_IDENTITY="Developer ID Application: YOUR NAME (YOUR_TEAM_ID)" \
-RELEASE_VERSION="0.1.4" \
+RELEASE_VERSION="0.1.5" \
 RELEASE_BUILD_NUMBER="5" \
 NOTARY_KEY_PATH="/secure/path/AuthKey_ABC123.p8" \
 NOTARY_KEY_ID="ABC123" \
@@ -164,7 +164,7 @@ NOTARY_ISSUER_ID="00000000-0000-0000-0000-000000000000" \
 SKIP_NOTARIZATION=1 \
 DEVELOPMENT_TEAM="YOUR_TEAM_ID" \
 SIGNING_IDENTITY="Developer ID Application: YOUR NAME (YOUR_TEAM_ID)" \
-RELEASE_VERSION="0.1.4" \
+RELEASE_VERSION="0.1.5" \
 RELEASE_BUILD_NUMBER="5" \
 ./scripts/build-signed-release.sh
 ```
@@ -219,7 +219,7 @@ workflow 运行在名为 `release` 的 GitHub Environment 中，需要配置以�
 ### 验证候选版本
 
 1. 运行 unsigned build/test，并用签名构建完成麦克风、指定 App、录屏和 KTV 的真机冒烟测试。
-2. 创建并推送精确格式为 `vMAJOR.MINOR.PATCH` 的 tag，例如 `v0.1.4`。workflow 会验证 tag 指向当前 checkout，版本号来自 tag，构建号使用该提交的 commit count。
+2. 创建并推送精确格式为 `vMAJOR.MINOR.PATCH` 的 tag，例如 `v0.1.5`。workflow 会验证 tag 指向当前 checkout，版本号来自 tag，构建号使用该提交的 commit count。
 3. 在 Actions 中手动运行 “Release Beatbox”，输入已经存在的 tag，并保持 `publish=false`。
 4. workflow 会签名、公证、装订票据、生成 appcast，并上传保留 7 天的 `Beatbox-<version>-release-candidate` artifact。它包含发行 zip、SHA-256、dSYM（若存在）和 `appcast.xml`，但不会创建 GitHub Release。
 5. 下载候选产物，完成 Gatekeeper、QuickTime、四条录制路径和从旧版升级的验证。

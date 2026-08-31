@@ -21,12 +21,47 @@ enum KaraokeSessionState: Equatable, Sendable {
         }
     }
 
+    var takeID: UUID? {
+        switch self {
+        case let .preparing(_, takeID), let .recording(_, takeID),
+             let .paused(_, takeID), let .finalizing(_, takeID):
+            takeID
+        case .idle, .completed, .failed:
+            nil
+        }
+    }
+
+    var failureMessage: String? {
+        guard case let .failed(_, message) = self else { return nil }
+        return message
+    }
+
     var isActive: Bool {
         switch self {
         case .preparing, .recording, .paused, .finalizing:
             true
         case .idle, .completed, .failed:
             false
+        }
+    }
+
+    func synchronized(with captureState: CaptureState) -> KaraokeSessionState {
+        guard let songID, let takeID else { return self }
+        return switch captureState {
+        case .recording(takeID):
+            .recording(songID: songID, takeID: takeID)
+        case .paused(takeID):
+            .paused(songID: songID, takeID: takeID)
+        case .finalizing(takeID):
+            .finalizing(songID: songID, takeID: takeID)
+        case let .failed(failure):
+            .failed(
+                songID: songID,
+                message: "\(failure.title)：\(failure.recoverySuggestion)"
+            )
+        case .idle, .requestingPermission, .preparing, .completed,
+             .recording, .paused, .finalizing:
+            self
         }
     }
 }
