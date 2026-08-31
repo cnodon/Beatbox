@@ -89,6 +89,11 @@ struct ContentView: View {
                         .id(song.id)
                 } else if appModel.selectedLibrary == .karaoke {
                     EmptyKaraokeDetailView()
+                } else if appModel.selectedVisibleRecordings.count > 1 {
+                    RecordingMultiSelectionDetailView(
+                        count: appModel.selectedVisibleRecordings.count,
+                        isRecentlyDeleted: appModel.selectedLibrary == .recentlyDeleted
+                    )
                 } else if let recording = appModel.selectedRecording {
                     RecordingDetailView(recording: recording)
                         .id(recording.id)
@@ -120,6 +125,23 @@ struct ContentView: View {
             ToolbarItem(placement: .primaryAction) {
                 CaptureToolbarStatus()
             }
+        }
+    }
+}
+
+private struct RecordingMultiSelectionDetailView: View {
+    let count: Int
+    let isRecentlyDeleted: Bool
+
+    var body: some View {
+        ContentUnavailableView {
+            Label("已选择 \(count) 个录音", systemImage: "checkmark.circle.fill")
+        } description: {
+            Text(
+                isRecentlyDeleted
+                    ? "可以从列表工具栏批量恢复或永久删除，按 Delete 也能删除所选项目。"
+                    : "可以从列表工具栏批量移到最近删除，按 Delete 也能删除所选项目。"
+            )
         }
     }
 }
@@ -175,7 +197,7 @@ private struct MessageBanner: View {
             Text(message)
                 .lineLimit(2)
             Spacer(minLength: 12)
-            if appModel.lastDeletedRecordingID != nil {
+            if !appModel.lastDeletedRecordingIDs.isEmpty {
                 Button("撤销") { appModel.undoLastDeletion() }
                     .buttonStyle(.borderless)
             }

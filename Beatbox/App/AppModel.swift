@@ -73,13 +73,17 @@ final class AppModel {
             }
         }
     }
-    var selectedRecordingID: UUID?
+    var selectedRecordingIDs: Set<UUID> = []
+    var selectedRecordingID: UUID? {
+        get { selectedRecordings.first?.id }
+        set { selectedRecordingIDs = newValue.map { Set([$0]) } ?? [] }
+    }
     var selectedKaraokeSongID: UUID?
     var searchText = ""
     var karaokeSearchText = ""
     private(set) var recordings: [Recording] = []
     private(set) var karaokeSongs: [KaraokeSong] = []
-    private(set) var lastDeletedRecordingID: UUID?
+    private(set) var lastDeletedRecordingIDs: Set<UUID> = []
     var userMessage: String?
     private(set) var userMessageAction: UserMessageAction?
     var recoveryIssueCount = 0
@@ -121,7 +125,11 @@ final class AppModel {
         category: "app-model"
     )
 
-    init(modelContext: ModelContext, storage: StoragePaths) throws {
+    init(
+        modelContext: ModelContext,
+        storage: StoragePaths,
+        performsStartupRecovery: Bool = true
+    ) throws {
         self.modelContext = modelContext
         self.storage = storage
         try storage.prepare()
@@ -145,9 +153,13 @@ final class AppModel {
             Task { _ = await self?.stopKaraokeSession() }
         }
 
-        recoverIncompleteRecordings()
+        if performsStartupRecovery {
+            recoverIncompleteRecordings()
+        }
         refreshRecordings()
-        Task { await recoverIncompleteScreenRecordings() }
+        if performsStartupRecovery {
+            Task { await recoverIncompleteScreenRecordings() }
+        }
         refreshKaraokeSongs()
         refreshMicrophones()
         refreshApplications()
@@ -170,8 +182,15 @@ final class AppModel {
     }
 
     var selectedRecording: Recording? {
-        guard let selectedRecordingID else { return nil }
-        return recordings.first { $0.id == selectedRecordingID }
+        selectedVisibleRecordings.first ?? selectedRecordings.first
+    }
+
+    var selectedRecordings: [Recording] {
+        recordings.filter { selectedRecordingIDs.contains($0.id) }
+    }
+
+    var selectedVisibleRecordings: [Recording] {
+        visibleRecordings.filter { selectedRecordingIDs.contains($0.id) }
     }
 
     var visibleKaraokeSongs: [KaraokeSong] {
@@ -739,6 +758,14 @@ final class AppModel {
         selectedRecordingID = recording.id
     }
 
+    func selectAllVisibleRecordings() {
+        selectedRecordingIDs = Set(visibleRecordings.map(\.id))
+    }
+
+    func clearRecordingSelection() {
+        selectedRecordingIDs.removeAll()
+    }
+
     func saveTitle(for recording: Recording, title: String) {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
@@ -748,84 +775,125 @@ final class AppModel {
     }
 
     func moveToRecentlyDeleted(_ recording: Recording) {
-        if playback.state.recordingID == recording.id {
+        moveToRecentlyDeleted([recording])
+    }
+
+    func moveToRecentlyDeleted(_ recordings: [Recording]) {
+        let targets = recordings.filter { !$0.isDeleted }
+        guard !targets.isEmpty else { return }
+        let targetIDs = Set(targets.map(\.id))
+        if let playbackID = playback.state.recordingID,
+           targetIDs.contains(playbackID) {
             playback.stop()
         }
-        recording.deletedAt = .now
+        let deletionDate = Date.now
+        for recording in targets {
+            recording.deletedAt = deletionDate
+        }
         guard saveChanges(messageOnFailure: "无法删除录音") else { return }
-        lastDeletedRecordingID = recording.id
-        selectedRecordingID = nil
-        userMessage = "录音已移到“最近删除”"
+        lastDeletedRecordingIDs = targetIDs
+        selectedRecordingIDs.subtract(targetIDs)
+        userMessage = targets.count == 1
+            ? "录音已移到“最近删除”"
+            : "已将 \(targets.count) 个录音移到“最近删除”"
         selectFirstVisibleRecordingIfNeeded()
     }
 
     func undoLastDeletion() {
-        guard let lastDeletedRecordingID,
-              let recording = recordings.first(where: { $0.id == lastDeletedRecordingID })
-        else { return }
-        recording.deletedAt = nil
+        let targets = recordings.filter { lastDeletedRecordingIDs.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        for recording in targets {
+            recording.deletedAt = nil
+        }
         guard saveChanges(messageOnFailure: "无法恢复录音") else { return }
-        self.lastDeletedRecordingID = nil
+        lastDeletedRecordingIDs.removeAll()
         selectedLibrary = .all
-        selectedRecordingID = recording.id
-        userMessage = "录音已恢复"
+        selectedRecordingIDs = Set(targets.map(\.id))
+        userMessage = targets.count == 1 ? "录音已恢复" : "已恢复 \(targets.count) 个录音"
     }
 
     func restore(_ recording: Recording) {
-        recording.deletedAt = nil
+        restore([recording])
+    }
+
+    func restore(_ recordings: [Recording]) {
+        let targets = recordings.filter(\.isDeleted)
+        guard !targets.isEmpty else { return }
+        for recording in targets {
+            recording.deletedAt = nil
+        }
         guard saveChanges(messageOnFailure: "无法恢复录音") else { return }
+        lastDeletedRecordingIDs.subtract(Set(targets.map(\.id)))
         selectedLibrary = .all
-        selectedRecordingID = recording.id
+        selectedRecordingIDs = Set(targets.map(\.id))
+        userMessage = targets.count == 1 ? "录音已恢复" : "已恢复 \(targets.count) 个录音"
     }
 
     func deletePermanently(_ recording: Recording) {
-        if playback.state.recordingID == recording.id {
+        deletePermanently([recording])
+    }
+
+    func deletePermanently(_ recordings: [Recording]) {
+        let targets = recordings.filter(\.isDeleted)
+        guard !targets.isEmpty else { return }
+        let targetIDs = Set(targets.map(\.id))
+        if let playbackID = playback.state.recordingID,
+           targetIDs.contains(playbackID) {
             playback.stop()
         }
-        let url = fileURL(for: recording)
-        let quarantineURL = storage.recordingsURL.appending(
-            path: ".\(recording.id.uuidString).deleting-\(UUID().uuidString)"
-        )
-        var quarantinedFile = false
+        var quarantinedFiles: [(original: URL, quarantine: URL)] = []
         do {
-            if FileManager.default.fileExists(atPath: url.path) {
-                try FileManager.default.moveItem(at: url, to: quarantineURL)
-                quarantinedFile = true
+            for recording in targets {
+                let originalURL = fileURL(for: recording)
+                guard FileManager.default.fileExists(atPath: originalURL.path) else { continue }
+                let quarantineURL = originalURL.deletingLastPathComponent().appending(
+                    path: ".\(recording.id.uuidString).deleting-\(UUID().uuidString)"
+                )
+                try FileManager.default.moveItem(at: originalURL, to: quarantineURL)
+                quarantinedFiles.append((originalURL, quarantineURL))
             }
-            modelContext.delete(recording)
+            for recording in targets {
+                modelContext.delete(recording)
+            }
             try modelContext.save()
+            lastDeletedRecordingIDs.subtract(targetIDs)
             refreshRecordings()
-            selectedRecordingID = nil
+            selectedRecordingIDs.subtract(targetIDs)
             selectFirstVisibleRecordingIfNeeded()
-            if quarantinedFile {
+            for quarantinedFile in quarantinedFiles {
                 do {
-                    try FileManager.default.removeItem(at: quarantineURL)
+                    try FileManager.default.removeItem(at: quarantinedFile.quarantine)
                 } catch {
                     logger.error("Unable to remove quarantined recording: \(error.localizedDescription, privacy: .private)")
                 }
             }
+            userMessage = targets.count == 1
+                ? "录音已永久删除"
+                : "已永久删除 \(targets.count) 个录音"
         } catch {
             modelContext.rollback()
-            if quarantinedFile,
-               FileManager.default.fileExists(atPath: quarantineURL.path),
-               !FileManager.default.fileExists(atPath: url.path) {
+            for quarantinedFile in quarantinedFiles.reversed()
+            where FileManager.default.fileExists(atPath: quarantinedFile.quarantine.path)
+                && !FileManager.default.fileExists(atPath: quarantinedFile.original.path) {
                 do {
-                    try FileManager.default.moveItem(at: quarantineURL, to: url)
+                    try FileManager.default.moveItem(
+                        at: quarantinedFile.quarantine,
+                        to: quarantinedFile.original
+                    )
                 } catch {
                     logger.error("Unable to restore recording after delete failure: \(error.localizedDescription, privacy: .private)")
                 }
             }
             refreshRecordings()
             logger.error("Unable to permanently delete recording: \(error.localizedDescription, privacy: .private)")
-            userMessage = "无法永久删除这段录音。"
+            userMessage = targets.count == 1
+                ? "无法永久删除这段录音。"
+                : "无法永久删除所选录音，文件已恢复。"
         }
     }
 
     func emptyRecentlyDeleted() {
-        let deletedRecordings = recordings.filter(\.isDeleted)
-        for recording in deletedRecordings {
-            deletePermanently(recording)
-        }
+        deletePermanently(recordings.filter(\.isDeleted))
     }
 
     func export(_ recording: Recording) {
@@ -1077,11 +1145,12 @@ final class AppModel {
     }
 
     private func selectFirstVisibleRecordingIfNeeded() {
-        if let selectedRecordingID,
-           visibleRecordings.contains(where: { $0.id == selectedRecordingID }) {
-            return
+        let visibleIDs = Set(visibleRecordings.map(\.id))
+        selectedRecordingIDs.formIntersection(visibleIDs)
+        if selectedRecordingIDs.isEmpty,
+           let firstVisibleID = visibleRecordings.first?.id {
+            selectedRecordingIDs.insert(firstVisibleID)
         }
-        selectedRecordingID = visibleRecordings.first?.id
     }
 
     private func selectFirstVisibleKaraokeSongIfNeeded() {

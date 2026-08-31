@@ -27,7 +27,7 @@ Beatbox 使用 Swift 6 和 SwiftUI；音频录制基于 AVFAudio，App/系统音
 | 录屏与音频 | 录制主显示器、鼠标指针和系统音频，保存为 MOV（H.264 + AAC） |
 | 录制反馈 | 首个有效音频缓冲区到达后才显示“正在录制”；提供计时、滚动波形、平均/峰值电平、静音和削波提示 |
 | 文件安全 | 持续写入本机文件、停止时等待封装、启动时扫描可恢复的未完成文件，并在空间不足或写入失败时提供下一步操作 |
-| 资料库 | 搜索、回放、重命名、最近删除、恢复、Finder 定位；停止后自动选中新文件 |
+| 资料库 | 搜索、回放、重命名、最近删除、恢复、Finder 定位；支持 `⌘A` 全选、`⌘/Shift` 多选和批量删除；停止后自动选中新文件 |
 | 导出 | AAC、WAV、ALAC、AIFF、CAF、FLAC；录屏可导出 MOV，资料库原件不会因导出被移动 |
 | KTV | 导入标准音频或 NCM，可匹配同名 LRC；试听、定位、逐行歌词、实验性中置人声消除、可调耳机人声监听，并在播放歌曲时单独录制麦克风人声 |
 | macOS 交互 | 原生菜单、快捷键、Dock 录制状态、窗口关闭后继续录制，以及键盘和 VoiceOver 基础支持 |
@@ -140,8 +140,8 @@ unsigned build 适合编译与自动化测试，不代表麦克风、ScreenCaptu
 ```sh
 DEVELOPMENT_TEAM="YOUR_TEAM_ID" \
 SIGNING_IDENTITY="Developer ID Application: YOUR NAME (YOUR_TEAM_ID)" \
-RELEASE_VERSION="0.1.5" \
-RELEASE_BUILD_NUMBER="5" \
+RELEASE_VERSION="0.1.6" \
+RELEASE_BUILD_NUMBER="7" \
 NOTARY_KEY_PATH="/secure/path/AuthKey_ABC123.p8" \
 NOTARY_KEY_ID="ABC123" \
 NOTARY_ISSUER_ID="00000000-0000-0000-0000-000000000000" \
@@ -164,8 +164,8 @@ NOTARY_ISSUER_ID="00000000-0000-0000-0000-000000000000" \
 SKIP_NOTARIZATION=1 \
 DEVELOPMENT_TEAM="YOUR_TEAM_ID" \
 SIGNING_IDENTITY="Developer ID Application: YOUR NAME (YOUR_TEAM_ID)" \
-RELEASE_VERSION="0.1.5" \
-RELEASE_BUILD_NUMBER="5" \
+RELEASE_VERSION="0.1.6" \
+RELEASE_BUILD_NUMBER="7" \
 ./scripts/build-signed-release.sh
 ```
 
@@ -219,7 +219,7 @@ workflow 运行在名为 `release` 的 GitHub Environment 中，需要配置以�
 ### 验证候选版本
 
 1. 运行 unsigned build/test，并用签名构建完成麦克风、指定 App、录屏和 KTV 的真机冒烟测试。
-2. 创建并推送精确格式为 `vMAJOR.MINOR.PATCH` 的 tag，例如 `v0.1.5`。workflow 会验证 tag 指向当前 checkout，版本号来自 tag，构建号使用该提交的 commit count。
+2. 创建并推送精确格式为 `vMAJOR.MINOR.PATCH` 的 tag，例如 `v0.1.6`。workflow 会验证 tag 指向当前 checkout，版本号来自 tag，构建号使用该提交的 commit count。
 3. 在 Actions 中手动运行 “Release Beatbox”，输入已经存在的 tag，并保持 `publish=false`。
 4. workflow 会签名、公证、装订票据、生成 appcast，并上传保留 7 天的 `Beatbox-<version>-release-candidate` artifact。它包含发行 zip、SHA-256、dSYM（若存在）和 `appcast.xml`，但不会创建 GitHub Release。
 5. 下载候选产物，完成 Gatekeeper、QuickTime、四条录制路径和从旧版升级的验证。

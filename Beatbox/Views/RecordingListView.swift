@@ -4,12 +4,12 @@ import SwiftUI
 struct RecordingListView: View {
     @Environment(AppModel.self) private var appModel
     @State private var showingEmptyTrashConfirmation = false
-    @State private var recordingPendingPermanentDeletionID: UUID?
+    @State private var recordingsPendingPermanentDeletionIDs: Set<UUID> = []
 
     var body: some View {
         @Bindable var appModel = appModel
 
-        List(selection: $appModel.selectedRecordingID) {
+        List(selection: $appModel.selectedRecordingIDs) {
             ForEach(appModel.visibleRecordings) { recording in
                 RecordingRow(
                     recording: recording,
@@ -43,6 +43,56 @@ struct RecordingListView: View {
         .searchable(text: $appModel.searchText, placement: .toolbar, prompt: "搜索录音")
         .navigationTitle(appModel.selectedLibrary.title)
         .toolbar {
+            if appModel.visibleRecordings.count > 1 {
+                ToolbarItem {
+                    Button {
+                        if hasSelectedAllVisibleRecordings {
+                            appModel.clearRecordingSelection()
+                        } else {
+                            appModel.selectAllVisibleRecordings()
+                        }
+                    } label: {
+                        Label(
+                            hasSelectedAllVisibleRecordings ? "取消全选" : "全选",
+                            systemImage: hasSelectedAllVisibleRecordings
+                                ? "checkmark.circle.fill"
+                                : "checkmark.circle"
+                        )
+                    }
+                    .help(hasSelectedAllVisibleRecordings ? "取消选择全部录音" : "选择当前列表中的全部录音（⌘A）")
+                }
+            }
+
+            if !appModel.selectedVisibleRecordings.isEmpty {
+                if appModel.selectedLibrary == .recentlyDeleted {
+                    ToolbarItem {
+                        Button {
+                            appModel.restore(appModel.selectedVisibleRecordings)
+                        } label: {
+                            Label("恢复 \(selectedCount) 项", systemImage: "arrow.uturn.backward")
+                        }
+                        .help("恢复全部选中的录音")
+                    }
+                    ToolbarItem {
+                        Button(role: .destructive) {
+                            requestPermanentDeletion(of: appModel.selectedVisibleRecordings)
+                        } label: {
+                            Label("删除 \(selectedCount) 项", systemImage: "trash")
+                        }
+                        .help("永久删除全部选中的录音")
+                    }
+                } else {
+                    ToolbarItem {
+                        Button(role: .destructive) {
+                            appModel.moveToRecentlyDeleted(appModel.selectedVisibleRecordings)
+                        } label: {
+                            Label("删除 \(selectedCount) 项", systemImage: "trash")
+                        }
+                        .help("将全部选中的录音移到最近删除")
+                    }
+                }
+            }
+
             if appModel.selectedLibrary == .recentlyDeleted,
                !appModel.visibleRecordings.isEmpty {
                 ToolbarItem {
@@ -54,11 +104,12 @@ struct RecordingListView: View {
             }
         }
         .onDeleteCommand {
-            guard let recording = appModel.selectedRecording else { return }
-            if recording.isDeleted {
-                recordingPendingPermanentDeletionID = recording.id
+            let selectedRecordings = appModel.selectedVisibleRecordings
+            guard !selectedRecordings.isEmpty else { return }
+            if appModel.selectedLibrary == .recentlyDeleted {
+                requestPermanentDeletion(of: selectedRecordings)
             } else {
-                appModel.moveToRecentlyDeleted(recording)
+                appModel.moveToRecentlyDeleted(selectedRecordings)
             }
         }
         .confirmationDialog(
@@ -68,52 +119,58 @@ struct RecordingListView: View {
             Button("永久删除", role: .destructive) { appModel.emptyRecentlyDeleted() }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("将永久删除 \(appModel.visibleRecordings.count) 个文件，此操作无法撤销。")
+            Text("将永久删除最近删除中的全部文件，此操作无法撤销。")
         }
         .confirmationDialog(
             permanentDeletionTitle,
             isPresented: Binding(
-                get: { recordingPendingPermanentDeletionID != nil },
-                set: { if !$0 { recordingPendingPermanentDeletionID = nil } }
+                get: { !recordingsPendingPermanentDeletionIDs.isEmpty },
+                set: { if !$0 { recordingsPendingPermanentDeletionIDs.removeAll() } }
             )
         ) {
             Button("永久删除", role: .destructive) {
-                if let recording = recordingPendingPermanentDeletion {
-                    appModel.deletePermanently(recording)
-                }
-                recordingPendingPermanentDeletionID = nil
+                appModel.deletePermanently(recordingsPendingPermanentDeletion)
+                recordingsPendingPermanentDeletionIDs.removeAll()
             }
             Button("取消", role: .cancel) {
-                recordingPendingPermanentDeletionID = nil
+                recordingsPendingPermanentDeletionIDs.removeAll()
             }
         } message: {
-            Text("此操作无法撤销。")
+            Text("所选 \(recordingsPendingPermanentDeletion.count) 个文件将被移除，此操作无法撤销。")
         }
     }
 
     @ViewBuilder
     private func recordingContextMenu(_ recording: Recording) -> some View {
+        let targets = contextTargets(for: recording)
         if recording.isDeleted {
-            Button("恢复") { appModel.restore(recording) }
+            Button(targets.count == 1 ? "恢复" : "恢复 \(targets.count) 项") {
+                appModel.restore(targets)
+            }
             Button("立即删除…", role: .destructive) {
-                recordingPendingPermanentDeletionID = recording.id
+                requestPermanentDeletion(of: targets)
             }
         } else {
-            if recording.recordingMode == .screenAndAudio {
+            if targets.count == 1, recording.recordingMode == .screenAndAudio {
                 Button("显示录屏") {
                     appModel.selectedRecordingID = recording.id
                 }
-            } else {
+            } else if targets.count == 1 {
                 Button(playbackStatus(for: recording) == .playing ? "暂停" : "播放") {
                     appModel.togglePlayback(for: recording)
                 }
             }
-            Button("导出为…") { appModel.export(recording) }
-                .disabled(appModel.isExporting || appModel.capture.state.isCapturing)
-            Button("在 Finder 中显示") { appModel.reveal(recording) }
+            if targets.count == 1 {
+                Button("导出为…") { appModel.export(recording) }
+                    .disabled(appModel.isExporting || appModel.capture.state.isCapturing)
+                Button("在 Finder 中显示") { appModel.reveal(recording) }
+            }
             Divider()
-            Button("移到最近删除", role: .destructive) {
-                appModel.moveToRecentlyDeleted(recording)
+            Button(
+                targets.count == 1 ? "移到最近删除" : "将 \(targets.count) 项移到最近删除",
+                role: .destructive
+            ) {
+                appModel.moveToRecentlyDeleted(targets)
             }
         }
     }
@@ -130,14 +187,33 @@ struct RecordingListView: View {
             : "移到这里的录音可以恢复或永久删除。"
     }
 
-    private var recordingPendingPermanentDeletion: Recording? {
-        guard let recordingPendingPermanentDeletionID else { return nil }
-        return appModel.recordings.first { $0.id == recordingPendingPermanentDeletionID }
+    private var recordingsPendingPermanentDeletion: [Recording] {
+        appModel.recordings.filter { recordingsPendingPermanentDeletionIDs.contains($0.id) }
     }
 
     private var permanentDeletionTitle: String {
-        guard let recording = recordingPendingPermanentDeletion else { return "永久删除录音？" }
+        let recordings = recordingsPendingPermanentDeletion
+        guard recordings.count == 1, let recording = recordings.first else {
+            return "永久删除所选 \(recordings.count) 个录音？"
+        }
         return "永久删除“\(recording.title)”？"
+    }
+
+    private var selectedCount: Int { appModel.selectedVisibleRecordings.count }
+
+    private var hasSelectedAllVisibleRecordings: Bool {
+        let visibleIDs = Set(appModel.visibleRecordings.map(\.id))
+        return !visibleIDs.isEmpty && visibleIDs.isSubset(of: appModel.selectedRecordingIDs)
+    }
+
+    private func contextTargets(for recording: Recording) -> [Recording] {
+        guard appModel.selectedRecordingIDs.contains(recording.id) else { return [recording] }
+        let selected = appModel.selectedVisibleRecordings
+        return selected.isEmpty ? [recording] : selected
+    }
+
+    private func requestPermanentDeletion(of recordings: [Recording]) {
+        recordingsPendingPermanentDeletionIDs = Set(recordings.map(\.id))
     }
 
     private func playbackStatus(for recording: Recording) -> RecordingRowPlaybackStatus {
