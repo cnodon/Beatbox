@@ -213,16 +213,12 @@ final class AppModel {
             .audio,
         ]
         guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
-        Task { await importKaraokeSong(from: sourceURL) }
+        let lyricsURL = requestAccessToMatchingLyrics(for: sourceURL)
+        Task { await importKaraokeSong(from: sourceURL, lyricsURL: lyricsURL) }
     }
 
-    func importKaraokeSong(from sourceURL: URL) async {
+    func importKaraokeSong(from sourceURL: URL, lyricsURL: URL? = nil) async {
         guard !karaokeImportState.isWorking else { return }
-        let baseURL = sourceURL.deletingPathExtension()
-        let candidateLyricsURL = baseURL.appendingPathExtension("lrc")
-        let lyricsURL = FileManager.default.fileExists(atPath: candidateLyricsURL.path)
-            ? candidateLyricsURL
-            : nil
         karaokeImportState = .converting(sourceURL.lastPathComponent)
         userMessage = sourceURL.pathExtension.lowercased() == "ncm"
             ? "正在转换 NCM，原文件会保留…"
@@ -261,6 +257,24 @@ final class AppModel {
             karaokeImportState = .failed(message)
             userMessage = message
         }
+    }
+
+    private func requestAccessToMatchingLyrics(for sourceURL: URL) -> URL? {
+        let candidateURL = sourceURL.deletingPathExtension().appendingPathExtension("lrc")
+        guard FileManager.default.fileExists(atPath: candidateURL.path) else { return nil }
+
+        let panel = NSOpenPanel()
+        panel.title = "授权读取歌词"
+        panel.prompt = "使用歌词"
+        panel.message = "Beatbox 找到了同名 LRC。请选中它以授权读取；取消仍会导入歌曲。"
+        panel.directoryURL = candidateURL.deletingLastPathComponent()
+        panel.nameFieldStringValue = candidateURL.lastPathComponent
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [UTType(filenameExtension: "lrc") ?? .plainText]
+
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
     }
 
     func select(_ song: KaraokeSong) {
