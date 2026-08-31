@@ -199,25 +199,6 @@ struct KaraokeDetailView: View {
                     .accessibilityHint("播放歌曲，同时把麦克风人声单独保存到资料库")
                 }
 
-                Toggle(isOn: Binding(
-                    get: { appModel.isVocalReductionEnabled(for: song) },
-                    set: { enabled in
-                        Task { await appModel.setVocalReductionEnabled(enabled, for: song) }
-                    }
-                )) {
-                    Label("消除原唱", systemImage: "person.crop.circle.badge.minus")
-                }
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .disabled(isActiveSession || appModel.isVocalReductionProcessing(for: song))
-                .help("实验性立体声中置人声抵消；单声道或偏离中央的主唱可能无法消除")
-
-                if appModel.isVocalReductionProcessing(for: song) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("正在生成人声消除版本")
-                }
-
                 Spacer(minLength: 16)
                 Image(systemName: "speaker.fill")
                     .foregroundStyle(.secondary)
@@ -229,17 +210,28 @@ struct KaraokeDetailView: View {
                 .accessibilityLabel("歌曲音量")
             }
 
+            karaokeOptions
+
             if isActiveSession {
                 Label(
                     isPausedSession
                         ? "已录内容安全保留；继续后从当前位置恢复。"
-                        : "麦克风人声正在持续保存到本机。建议使用耳机避免回授。",
+                        : appModel.isKaraokeMicrophoneMonitoringEnabled
+                            ? "麦克风人声正在保存，并低延迟回送到耳机。"
+                            : "麦克风人声正在持续保存到本机。建议使用耳机避免回授。",
                     systemImage: isPausedSession
                         ? "pause.circle"
                         : "externaldrive.fill.badge.checkmark"
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            } else if appModel.isKaraokeMicrophoneMonitoringEnabled {
+                Label(
+                    "耳机监听已开启。请确认输出设备是耳机；使用扬声器会产生回声或啸叫。",
+                    systemImage: "headphones"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
             } else if appModel.isVocalReductionEnabled(for: song) {
                 Label(
                     "实验性中置人声抵消已启用；会同时削弱位于中央的贝斯、鼓和其他乐器。",
@@ -266,6 +258,59 @@ struct KaraokeDetailView: View {
         .padding(.horizontal, 28)
         .padding(.vertical, 18)
         .background(.bar)
+    }
+
+    private var karaokeOptions: some View {
+        HStack(spacing: 12) {
+            Toggle(isOn: Binding(
+                get: { appModel.isVocalReductionEnabled(for: song) },
+                set: { enabled in
+                    Task { await appModel.setVocalReductionEnabled(enabled, for: song) }
+                }
+            )) {
+                Label("消除原唱", systemImage: "person.crop.circle.badge.minus")
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .disabled(isActiveSession || appModel.isVocalReductionProcessing(for: song))
+            .help("实验性立体声中置人声抵消；单声道或偏离中央的主唱可能无法消除")
+
+            if appModel.isVocalReductionProcessing(for: song) {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityLabel("正在生成人声消除版本")
+            }
+
+            Divider()
+                .frame(height: 20)
+
+            Toggle(isOn: Binding(
+                get: { appModel.isKaraokeMicrophoneMonitoringEnabled },
+                set: { appModel.isKaraokeMicrophoneMonitoringEnabled = $0 }
+            )) {
+                Label("耳机监听", systemImage: "headphones")
+            }
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .disabled(isActiveSession && !appModel.isKaraokeMicrophoneMonitoringEnabled)
+            .help("把麦克风人声低延迟送到当前音频输出；只应在佩戴耳机时开启")
+
+            if appModel.isKaraokeMicrophoneMonitoringEnabled {
+                Image(systemName: "mic.fill")
+                    .foregroundStyle(.secondary)
+                Slider(
+                    value: Binding(
+                        get: { appModel.karaokeMicrophoneMonitorVolume },
+                        set: { appModel.karaokeMicrophoneMonitorVolume = $0 }
+                    ),
+                    in: 0...1
+                )
+                .frame(width: 110)
+                .accessibilityLabel("麦克风监听音量")
+            }
+
+            Spacer()
+        }
     }
 
     private var sessionStateForSong: KaraokeSessionState {

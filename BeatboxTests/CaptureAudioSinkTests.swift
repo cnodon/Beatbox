@@ -67,4 +67,26 @@ struct CaptureAudioSinkTests {
 
         #expect(sink.finish().processedFrames == 480)
     }
+
+    @Test("24 kHz 单声道麦克风可创建 AAC 录音文件")
+    func lowSampleRateMicrophoneCreatesAACFile() throws {
+        let fileURL = FileManager.default.temporaryDirectory
+            .appending(path: "Beatbox-24k-Microphone-\(UUID().uuidString).m4a")
+        defer { try? FileManager.default.removeItem(at: fileURL) }
+
+        let settings = CaptureController.audioFileSettings(
+            sampleRate: 24_000,
+            channelCount: 1
+        )
+        #expect(settings[AVEncoderBitRateKey] == nil)
+
+        let file = try AVAudioFile(
+            forWriting: fileURL,
+            settings: settings,
+            commonFormat: .pcmFormatFloat32,
+            interleaved: false
+        )
+        #expect(file.fileFormat.sampleRate == 24_000)
+        #expect(file.fileFormat.channelCount == 1)
+    }
 }

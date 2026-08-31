@@ -26,6 +26,7 @@ final class CaptureController {
     @ObservationIgnored private var finalURL: URL?
     @ObservationIgnored private var activeID: UUID?
     @ObservationIgnored private var activeMode: RecordingMode = .audio
+    @ObservationIgnored private var isMonitoringMicrophone = false
     @ObservationIgnored private var silenceStartedAt: Date?
     @ObservationIgnored private var clippingDetectedAt: Date?
     @ObservationIgnored private var smoothedWaveformLevel: Float = 0.025
@@ -98,7 +99,9 @@ final class CaptureController {
         inProgressURL: URL,
         finalURL: URL,
         input: CaptureInput,
-        mode: RecordingMode = .audio
+        mode: RecordingMode = .audio,
+        monitorMicrophone: Bool = false,
+        monitorVolume: Float = 0.65
     ) async throws {
         guard state.canStart else { return }
         resetMeasurements()
@@ -160,13 +163,10 @@ final class CaptureController {
                 throw CaptureFailure.sourceUnavailable
             }
 
-            let settings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: inputFormat.sampleRate,
-                AVNumberOfChannelsKey: inputFormat.channelCount,
-                AVEncoderBitRateKey: inputFormat.channelCount > 1 ? 192_000 : 128_000,
-                AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
-            ]
+            let settings = Self.audioFileSettings(
+                sampleRate: inputFormat.sampleRate,
+                channelCount: inputFormat.channelCount
+            )
             let audioFile = try AVAudioFile(
                 forWriting: inProgressURL,
                 settings: settings,
@@ -178,6 +178,15 @@ final class CaptureController {
                 sampleRate: inputFormat.sampleRate
             )
             if let preparedEngine {
+                if monitorMicrophone {
+                    preparedEngine.connect(
+                        preparedEngine.inputNode,
+                        to: preparedEngine.mainMixerNode,
+                        format: inputFormat
+                    )
+                    preparedEngine.mainMixerNode.outputVolume = min(max(monitorVolume, 0), 1)
+                    isMonitoringMicrophone = true
+                }
                 preparedEngine.inputNode.installTap(
                     onBus: 0,
                     bufferSize: 1_024,
@@ -209,6 +218,7 @@ final class CaptureController {
         } catch let failure as CaptureFailure {
             state = .failed(failure)
             clearSession()
+            removePreparationArtifact(at: inProgressURL)
             throw failure
         } catch let tapError as ProcessTapCaptureError {
             let failure: CaptureFailure = tapError.isPermissionDenied
@@ -217,6 +227,7 @@ final class CaptureController {
             logger.error("Unable to prepare process tap: \(String(describing: tapError), privacy: .private)")
             state = .failed(failure)
             clearSession()
+            removePreparationArtifact(at: inProgressURL)
             throw failure
         } catch let captureError as ApplicationAudioCaptureError {
             let failure: CaptureFailure
@@ -231,6 +242,7 @@ final class CaptureController {
             logger.error("Unable to prepare application capture: \(String(describing: captureError), privacy: .private)")
             state = .failed(failure)
             clearSession()
+            removePreparationArtifact(at: inProgressURL)
             throw failure
         } catch let captureError as ScreenRecordingCaptureError {
             let failure: CaptureFailure = switch captureError {
@@ -240,13 +252,32 @@ final class CaptureController {
             logger.error("Unable to prepare screen recording: \(String(describing: captureError), privacy: .private)")
             state = .failed(failure)
             clearSession()
+            removePreparationArtifact(at: inProgressURL)
             throw failure
         } catch {
             logger.error("Unable to prepare recorder: \(error.localizedDescription, privacy: .private)")
             state = .failed(.unableToPrepare)
             clearSession()
+            removePreparationArtifact(at: inProgressURL)
             throw CaptureFailure.unableToPrepare
         }
+    }
+
+    static func audioFileSettings(
+        sampleRate: Double,
+        channelCount: AVAudioChannelCount
+    ) -> [String: Any] {
+        [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: channelCount,
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue,
+        ]
+    }
+
+    func setMicrophoneMonitorVolume(_ volume: Float) {
+        guard isMonitoringMicrophone else { return }
+        engine?.mainMixerNode.outputVolume = min(max(volume, 0), 1)
     }
 
     func waitUntilReady(timeout: Duration = .seconds(4)) async -> Bool {
@@ -543,6 +574,17 @@ final class CaptureController {
         waveformAccumulator.reset()
     }
 
+    private func removePreparationArtifact(at url: URL) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            logger.error(
+                "Unable to remove failed preparation artifact: \(error.localizedDescription, privacy: .private)"
+            )
+        }
+    }
+
     private func clearSession(keepMeasurements: Bool = false) {
         stopMetering()
         engine?.stop()
@@ -563,6 +605,7 @@ final class CaptureController {
         inProgressURL = nil
         finalURL = nil
         activeMode = .audio
+        isMonitoringMicrophone = false
         silenceStartedAt = nil
         clippingDetectedAt = nil
         if !keepMeasurements {

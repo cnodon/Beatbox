@@ -29,7 +29,7 @@ Beatbox 使用 Swift 6 和 SwiftUI；音频录制基于 AVFAudio，App/系统音
 | 文件安全 | 持续写入本机文件、停止时等待封装、启动时扫描可恢复的未完成文件，并在空间不足或写入失败时提供下一步操作 |
 | 资料库 | 搜索、回放、重命名、最近删除、恢复、Finder 定位；停止后自动选中新文件 |
 | 导出 | AAC、WAV、ALAC、AIFF、CAF、FLAC；录屏可导出 MOV，资料库原件不会因导出被移动 |
-| KTV | 导入标准音频或 NCM，可匹配同名 LRC；试听、定位、逐行歌词、实验性中置人声消除，并在播放歌曲时单独录制麦克风人声 |
+| KTV | 导入标准音频或 NCM，可匹配同名 LRC；试听、定位、逐行歌词、实验性中置人声消除、可调耳机人声监听，并在播放歌曲时单独录制麦克风人声 |
 | macOS 交互 | 原生菜单、快捷键、Dock 录制状态、窗口关闭后继续录制，以及键盘和 VoiceOver 基础支持 |
 | 软件更新 | 主窗口工具栏、菜单和设置中提供“检查更新…”，通过 Sparkle 2.9.6 验证并安装 GitHub Release |
 
@@ -68,8 +68,9 @@ Beatbox 会排除自己的输出，避免应用内回放被再次捕获。目标
 1. 在侧栏打开“KTV · 歌曲”，按 `⌘I` 导入 NCM、MP3、FLAC、M4A、WAV、AIFF、CAF 或 AAC。
 2. 如果音频旁存在同名 `.lrc`，Beatbox 会一并导入歌词。
 3. 需要伴奏时，可先打开“消除原唱”。Beatbox 会在本机生成衍生伴奏缓存，原歌曲不会被修改。
-4. 点击“录制我的演唱”。Beatbox 会先等待麦克风收到有效音频，再开始歌曲播放和歌词进度。
-5. 使用 `Space` 暂停/继续，使用 `⌘.` 停止并保存。演唱的人声文件会进入普通录音资料库。
+4. 已经佩戴耳机时，可打开“耳机监听”并调节麦克风监听音量；不要在使用扬声器时开启，否则可能产生回声或啸叫。
+5. 点击“录制我的演唱”。Beatbox 会先等待麦克风收到有效音频，再开始歌曲播放和歌词进度。
+6. 使用 `Space` 暂停/继续，使用 `⌘.` 停止并保存。演唱的人声文件会进入普通录音资料库。
 
 NCM 转换只在用户明确选择文件后发生，采用流式处理并输出 MP3 或 FLAC，原 NCM 不会被删除。“消除原唱”采用立体声左右声道的中置抵消，适合主唱位于声场中央的歌曲；单声道、偏离中央、带较多混响或已经特殊混音的人声可能残留，同时中央的贝斯、鼓和其他乐器也会被削弱。它不是 AI 分轨。外放歌曲时，麦克风可能再次收进扬声器声音，建议使用耳机。请只处理自己有权使用的音频。
 
@@ -139,8 +140,8 @@ unsigned build 适合编译与自动化测试，不代表麦克风、ScreenCaptu
 ```sh
 DEVELOPMENT_TEAM="YOUR_TEAM_ID" \
 SIGNING_IDENTITY="Developer ID Application: YOUR NAME (YOUR_TEAM_ID)" \
-RELEASE_VERSION="0.1.3" \
-RELEASE_BUILD_NUMBER="4" \
+RELEASE_VERSION="0.1.4" \
+RELEASE_BUILD_NUMBER="5" \
 NOTARY_KEY_PATH="/secure/path/AuthKey_ABC123.p8" \
 NOTARY_KEY_ID="ABC123" \
 NOTARY_ISSUER_ID="00000000-0000-0000-0000-000000000000" \
@@ -163,8 +164,8 @@ NOTARY_ISSUER_ID="00000000-0000-0000-0000-000000000000" \
 SKIP_NOTARIZATION=1 \
 DEVELOPMENT_TEAM="YOUR_TEAM_ID" \
 SIGNING_IDENTITY="Developer ID Application: YOUR NAME (YOUR_TEAM_ID)" \
-RELEASE_VERSION="0.1.3" \
-RELEASE_BUILD_NUMBER="4" \
+RELEASE_VERSION="0.1.4" \
+RELEASE_BUILD_NUMBER="5" \
 ./scripts/build-signed-release.sh
 ```
 
@@ -218,7 +219,7 @@ workflow 运行在名为 `release` 的 GitHub Environment 中，需要配置以�
 ### 验证候选版本
 
 1. 运行 unsigned build/test，并用签名构建完成麦克风、指定 App、录屏和 KTV 的真机冒烟测试。
-2. 创建并推送精确格式为 `vMAJOR.MINOR.PATCH` 的 tag，例如 `v0.1.3`。workflow 会验证 tag 指向当前 checkout，版本号来自 tag，构建号使用该提交的 commit count。
+2. 创建并推送精确格式为 `vMAJOR.MINOR.PATCH` 的 tag，例如 `v0.1.4`。workflow 会验证 tag 指向当前 checkout，版本号来自 tag，构建号使用该提交的 commit count。
 3. 在 Actions 中手动运行 “Release Beatbox”，输入已经存在的 tag，并保持 `publish=false`。
 4. workflow 会签名、公证、装订票据、生成 appcast，并上传保留 7 天的 `Beatbox-<version>-release-candidate` artifact。它包含发行 zip、SHA-256、dSYM（若存在）和 `appcast.xml`，但不会创建 GitHub Release。
 5. 下载候选产物，完成 Gatekeeper、QuickTime、四条录制路径和从旧版升级的验证。
@@ -242,6 +243,7 @@ workflow 运行在名为 `release` 的 GitHub Environment 中，需要配置以�
 - 指定 App 必须正在运行并出现在可发现列表中；目标退出、设备断开、睡眠/锁屏和权限撤销仍需更多真机覆盖。
 - 长时间录音、低磁盘空间、写入失败、强制终止和恢复路径仍处于发布前验证阶段。
 - KTV 属于实验功能。NCM 已使用本机真实文件验证内置解码，但不同历史版本的 NCM 容器仍需要更多兼容性测试。
+- KTV 耳机监听依赖当前 Mac 的输入/输出设备组合，蓝牙耳机启用麦克风时可能切换到低带宽通话模式并增加延迟。
 - Beatbox 只提供实验性的立体声中置人声抵消，不提供 AI 分轨、自动混音、音准评分、转写或多轨编辑。
 - 音频导出暂不支持 MP3；源文件为 MP3 时仅限 KTV 导入。
 - 当前配置的 feed 依赖公开可访问的 `github.com/cnodon/Beatbox` Release。仓库或 Release 为私有、尚未创建 Release，或 `appcast.xml` 未作为 latest Release asset 发布时，检查更新会失败；Sparkle 不会匿名读取私有 Release。

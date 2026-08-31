@@ -89,6 +89,22 @@ final class AppModel {
     private(set) var vocalReductionEnabledSongIDs: Set<UUID> = []
     private(set) var selectedSource: AudioSource = .defaultMicrophone
     var selectedRecordingMode: RecordingMode = .audio
+    var isKaraokeMicrophoneMonitoringEnabled = false {
+        didSet {
+            capture.setMicrophoneMonitorVolume(
+                isKaraokeMicrophoneMonitoringEnabled
+                    ? Float(karaokeMicrophoneMonitorVolume)
+                    : 0
+            )
+        }
+    }
+    var karaokeMicrophoneMonitorVolume: Double = 0.65 {
+        didSet {
+            if isKaraokeMicrophoneMonitoringEnabled {
+                capture.setMicrophoneMonitorVolume(Float(karaokeMicrophoneMonitorVolume))
+            }
+        }
+    }
     private(set) var microphoneSources: [AudioSource] = [.defaultMicrophone]
     private(set) var applicationSources: [AudioSource] = []
     private(set) var exportingRecordingID: UUID?
@@ -374,7 +390,9 @@ final class AppModel {
                 id: takeID,
                 inProgressURL: storage.inProgressURL(for: takeID),
                 finalURL: storage.finalURL(for: takeID),
-                input: input
+                input: input,
+                monitorMicrophone: isKaraokeMicrophoneMonitoringEnabled,
+                monitorVolume: Float(karaokeMicrophoneMonitorVolume)
             )
             guard await capture.waitUntilReady() else {
                 guard karaokeSessionState.isActive else { return }
