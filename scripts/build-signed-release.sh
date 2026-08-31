@@ -89,6 +89,8 @@ mkdir -p "${output_dir}"
 
 product_name="Beatbox-${RELEASE_VERSION}"
 xcarchive_path="${output_dir}/Beatbox.xcarchive"
+export_path="${output_dir}/Export"
+export_options_plist="${output_dir}/ExportOptions.plist"
 app_path="${output_dir}/Beatbox.app"
 release_archive="${output_dir}/${product_name}.zip"
 checksum_path="${release_archive}.sha256"
@@ -97,8 +99,8 @@ notary_result="${output_dir}/notarization.json"
 notary_log="${output_dir}/notarization-log.json"
 
 # Each path is a fixed child of the validated artifact directory.
-/bin/rm -rf -- "${xcarchive_path}" "${app_path}"
-/bin/rm -f -- "${release_archive}" "${checksum_path}" "${dsym_archive}" "${notary_result}" "${notary_log}"
+/bin/rm -rf -- "${xcarchive_path}" "${export_path}" "${app_path}"
+/bin/rm -f -- "${export_options_plist}" "${release_archive}" "${checksum_path}" "${dsym_archive}" "${notary_result}" "${notary_log}"
 
 xcodebuild \
     -project "${project_dir}/Beatbox.xcodeproj" \
@@ -122,7 +124,32 @@ if [[ ! -d ${archived_app} ]]; then
     exit 70
 fi
 
-ditto "${archived_app}" "${app_path}"
+# Exporting the archive is essential for Sparkle. Xcode re-signs Sparkle's
+# nested updater app, executable, and XPC services with the same Developer ID
+# identity and adds secure timestamps. Copying the app straight out of the
+# xcarchive leaves those helpers with Sparkle's upstream signature, which
+# Apple rejects during notarization.
+/usr/bin/plutil -create xml1 "${export_options_plist}"
+/usr/bin/plutil -insert method -string developer-id "${export_options_plist}"
+/usr/bin/plutil -insert destination -string export "${export_options_plist}"
+/usr/bin/plutil -insert signingStyle -string manual "${export_options_plist}"
+/usr/bin/plutil -insert signingCertificate -string "${SIGNING_IDENTITY}" "${export_options_plist}"
+/usr/bin/plutil -insert teamID -string "${DEVELOPMENT_TEAM}" "${export_options_plist}"
+/usr/bin/plutil -insert stripSwiftSymbols -bool true "${export_options_plist}"
+
+xcodebuild \
+    -exportArchive \
+    -archivePath "${xcarchive_path}" \
+    -exportPath "${export_path}" \
+    -exportOptionsPlist "${export_options_plist}"
+
+exported_app="${export_path}/Beatbox.app"
+if [[ ! -d ${exported_app} ]]; then
+    print -u2 "Export did not contain Beatbox.app at the expected path."
+    exit 70
+fi
+
+ditto "${exported_app}" "${app_path}"
 
 actual_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${app_path}/Contents/Info.plist")
 actual_build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "${app_path}/Contents/Info.plist")
