@@ -13,7 +13,7 @@ nonisolated struct CaptureAudioSnapshot: Sendable {
 // AVAudioEngine invokes its tap on a framework-managed thread. Every mutable
 // field is protected by OSAllocatedUnfairLock, so the sink can safely cross
 // that callback boundary despite AVFAudio lacking complete Sendable annotations.
-final class CaptureAudioSink: @unchecked Sendable {
+nonisolated final class CaptureAudioSink: @unchecked Sendable {
     private struct State {
         var audioFile: AVAudioFile?
         var averagePower: Float = -160
@@ -30,7 +30,7 @@ final class CaptureAudioSink: @unchecked Sendable {
         state = OSAllocatedUnfairLock(initialState: State(audioFile: audioFile))
     }
 
-    nonisolated func consume(_ buffer: AVAudioPCMBuffer) {
+    func consume(_ buffer: AVAudioPCMBuffer) {
         let meters = Self.meters(in: buffer)
         state.withLock { state in
             guard state.errorDescription == nil else { return }
@@ -45,7 +45,7 @@ final class CaptureAudioSink: @unchecked Sendable {
         }
     }
 
-    nonisolated func snapshot() -> CaptureAudioSnapshot {
+    func snapshot() -> CaptureAudioSnapshot {
         state.withLock { state in
             CaptureAudioSnapshot(
                 averagePower: state.averagePower,
@@ -57,7 +57,7 @@ final class CaptureAudioSink: @unchecked Sendable {
         }
     }
 
-    nonisolated func finish() -> CaptureAudioSnapshot {
+    func finish() -> CaptureAudioSnapshot {
         state.withLock { state in
             let snapshot = CaptureAudioSnapshot(
                 averagePower: state.averagePower,
@@ -71,7 +71,13 @@ final class CaptureAudioSink: @unchecked Sendable {
         }
     }
 
-    private nonisolated static func meters(
+    static func tapHandler(for sink: CaptureAudioSink) -> AVAudioNodeTapBlock {
+        { buffer, _ in
+            sink.consume(buffer)
+        }
+    }
+
+    private static func meters(
         in buffer: AVAudioPCMBuffer
     ) -> (average: Float, peak: Float) {
         guard buffer.format.commonFormat == .pcmFormatFloat32,

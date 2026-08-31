@@ -3,6 +3,10 @@ import Foundation
 import Testing
 @testable import Beatbox
 
+private nonisolated struct SendableAudioTap: @unchecked Sendable {
+    let block: AVAudioNodeTapBlock
+}
+
 @Suite("录音文件写入")
 @MainActor
 struct CaptureAudioSinkTests {
@@ -39,5 +43,28 @@ struct CaptureAudioSinkTests {
 
         let readableFile = try AVAudioFile(forReading: fileURL)
         #expect(readableFile.length == 480)
+    }
+
+    @Test("音频 tap 可在系统后台队列安全调用")
+    func tapHandlerRunsOutsideMainActor() async throws {
+        let format = try #require(AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false
+        ))
+        let sink = CaptureAudioSink(sampleRate: format.sampleRate)
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 480))
+        buffer.frameLength = 480
+        let handler = SendableAudioTap(block: CaptureAudioSink.tapHandler(for: sink))
+
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInteractive).async {
+                handler.block(buffer, AVAudioTime(sampleTime: 0, atRate: format.sampleRate))
+                continuation.resume()
+            }
+        }
+
+        #expect(sink.finish().processedFrames == 480)
     }
 }

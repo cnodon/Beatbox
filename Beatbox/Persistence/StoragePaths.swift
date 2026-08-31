@@ -15,6 +15,10 @@ nonisolated struct StoragePaths: Sendable {
         karaokeURL.appending(path: ".Staging", directoryHint: .isDirectory)
     }
 
+    var karaokeDerivedURL: URL {
+        karaokeURL.appending(path: ".Derived", directoryHint: .isDirectory)
+    }
+
     init(rootURL: URL) {
         self.rootURL = rootURL
     }
@@ -35,6 +39,7 @@ nonisolated struct StoragePaths: Sendable {
         try fileManager.createDirectory(at: recordingsURL, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: karaokeURL, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: karaokeStagingURL, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: karaokeDerivedURL, withIntermediateDirectories: true)
     }
 
     func inProgressURL(for id: UUID, mode: RecordingMode = .audio) -> URL {
@@ -63,6 +68,10 @@ nonisolated struct StoragePaths: Sendable {
 
     func karaokeStagingURL(for id: UUID) -> URL {
         karaokeStagingURL.appending(path: id.uuidString, directoryHint: .isDirectory)
+    }
+
+    func karaokeVocalReductionURL(for id: UUID) -> URL {
+        karaokeDerivedURL.appending(path: "\(id.uuidString)-accompaniment.caf")
     }
 
     func inProgressFiles(fileManager: FileManager = .default) throws -> [URL] {

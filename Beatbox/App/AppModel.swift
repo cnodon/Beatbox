@@ -44,6 +44,13 @@ enum UserMessageAction {
     }
 }
 
+enum VocalReductionState: Equatable {
+    case idle
+    case processing(UUID)
+    case ready(UUID)
+    case failed(UUID, String)
+}
+
 @Observable
 final class AppModel {
     let capture = CaptureController()
@@ -78,6 +85,8 @@ final class AppModel {
     var recoveryIssueCount = 0
     private(set) var karaokeImportState: KaraokeImportState = .idle
     private(set) var karaokeSessionState: KaraokeSessionState = .idle
+    private(set) var vocalReductionState: VocalReductionState = .idle
+    private(set) var vocalReductionEnabledSongIDs: Set<UUID> = []
     private(set) var selectedSource: AudioSource = .defaultMicrophone
     var selectedRecordingMode: RecordingMode = .audio
     private(set) var microphoneSources: [AudioSource] = [.defaultMicrophone]
@@ -89,6 +98,7 @@ final class AppModel {
     @ObservationIgnored private let audioExporter = AudioExporter()
     @ObservationIgnored private let videoExporter = VideoExporter()
     @ObservationIgnored private let karaokeImporter = KaraokeImporter()
+    @ObservationIgnored private let vocalReductionProcessor = VocalReductionProcessor()
     @ObservationIgnored private var stopTask: Task<Bool, Never>?
     @ObservationIgnored private let logger = Logger(
         subsystem: "com.tokenplay.beatbox",
@@ -187,6 +197,7 @@ final class AppModel {
             && selectedSource.isAvailable
             && capture.state.canStart
             && !karaokeImportState.isWorking
+            && !isVocalReductionWorking
     }
 
     func recordingCount(in section: LibrarySection) -> Int {
@@ -282,9 +293,51 @@ final class AppModel {
     }
 
     func toggleKaraokePlayback(for song: KaraokeSong) {
-        guard !capture.state.isCapturing else { return }
+        guard !capture.state.isCapturing,
+              !isVocalReductionProcessing(for: song) else { return }
         playback.stop()
         karaokePlayback.toggle(id: song.id, url: karaokeAudioURL(for: song))
+    }
+
+    func isVocalReductionEnabled(for song: KaraokeSong) -> Bool {
+        vocalReductionEnabledSongIDs.contains(song.id)
+    }
+
+    func isVocalReductionProcessing(for song: KaraokeSong) -> Bool {
+        if case .processing(song.id) = vocalReductionState { return true }
+        return false
+    }
+
+    func setVocalReductionEnabled(_ enabled: Bool, for song: KaraokeSong) async {
+        guard !karaokeSessionState.isActive,
+              !isVocalReductionWorking else { return }
+        karaokePlayback.stop()
+
+        guard enabled else {
+            vocalReductionEnabledSongIDs.remove(song.id)
+            vocalReductionState = .idle
+            userMessage = "已恢复原唱音频"
+            return
+        }
+
+        let destinationURL = storage.karaokeVocalReductionURL(for: song.id)
+        vocalReductionState = .processing(song.id)
+        userMessage = "正在本机生成人声消除版本…"
+        do {
+            if !FileManager.default.fileExists(atPath: destinationURL.path) {
+                _ = try await vocalReductionProcessor.createAccompaniment(
+                    sourceURL: storage.karaokeURL(for: song.audioFileName),
+                    destinationURL: destinationURL
+                )
+            }
+            vocalReductionEnabledSongIDs.insert(song.id)
+            vocalReductionState = .ready(song.id)
+            userMessage = "已启用实验性人声消除"
+        } catch {
+            vocalReductionEnabledSongIDs.remove(song.id)
+            vocalReductionState = .failed(song.id, error.localizedDescription)
+            userMessage = "无法消除原唱：\(error.localizedDescription)"
+        }
     }
 
     func startKaraokeSession(for song: KaraokeSong) async {
@@ -358,6 +411,11 @@ final class AppModel {
             karaokeSessionState = .failed(songID: song.id, message: error.localizedDescription)
             userMessage = "无法开始跟唱录音。"
         }
+    }
+
+    private var isVocalReductionWorking: Bool {
+        if case .processing = vocalReductionState { return true }
+        return false
     }
 
     func toggleKaraokePause() {
@@ -438,11 +496,16 @@ final class AppModel {
     }
 
     func reveal(_ song: KaraokeSong) {
-        NSWorkspace.shared.activateFileViewerSelecting([karaokeAudioURL(for: song)])
+        NSWorkspace.shared.activateFileViewerSelecting([storage.karaokeURL(for: song.audioFileName)])
     }
 
     func karaokeAudioURL(for song: KaraokeSong) -> URL {
-        storage.karaokeURL(for: song.audioFileName)
+        let reducedURL = storage.karaokeVocalReductionURL(for: song.id)
+        if vocalReductionEnabledSongIDs.contains(song.id),
+           FileManager.default.fileExists(atPath: reducedURL.path) {
+            return reducedURL
+        }
+        return storage.karaokeURL(for: song.audioFileName)
     }
 
     func requestMicrophonePermission() async -> Bool {

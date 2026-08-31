@@ -181,10 +181,9 @@ final class CaptureController {
                 preparedEngine.inputNode.installTap(
                     onBus: 0,
                     bufferSize: 1_024,
-                    format: inputFormat
-                ) { buffer, _ in
-                    audioSink.consume(buffer)
-                }
+                    format: inputFormat,
+                    block: CaptureAudioSink.tapHandler(for: audioSink)
+                )
                 inputTapInstalled = true
             }
 

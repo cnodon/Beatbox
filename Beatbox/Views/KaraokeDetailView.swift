@@ -171,7 +171,10 @@ struct KaraokeDetailView: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.large)
-                    .disabled(appModel.capture.state.isCapturing)
+                    .disabled(
+                        appModel.capture.state.isCapturing
+                            || appModel.isVocalReductionProcessing(for: song)
+                    )
 
                     Button { appModel.karaokePlayback.skip(by: 10) } label: {
                         Label("前进 10 秒", systemImage: "goforward.10")
@@ -196,6 +199,25 @@ struct KaraokeDetailView: View {
                     .accessibilityHint("播放歌曲，同时把麦克风人声单独保存到资料库")
                 }
 
+                Toggle(isOn: Binding(
+                    get: { appModel.isVocalReductionEnabled(for: song) },
+                    set: { enabled in
+                        Task { await appModel.setVocalReductionEnabled(enabled, for: song) }
+                    }
+                )) {
+                    Label("消除原唱", systemImage: "person.crop.circle.badge.minus")
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .disabled(isActiveSession || appModel.isVocalReductionProcessing(for: song))
+                .help("实验性立体声中置人声抵消；单声道或偏离中央的主唱可能无法消除")
+
+                if appModel.isVocalReductionProcessing(for: song) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityLabel("正在生成人声消除版本")
+                }
+
                 Spacer(minLength: 16)
                 Image(systemName: "speaker.fill")
                     .foregroundStyle(.secondary)
@@ -218,6 +240,13 @@ struct KaraokeDetailView: View {
                 )
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            } else if appModel.isVocalReductionEnabled(for: song) {
+                Label(
+                    "实验性中置人声抵消已启用；会同时削弱位于中央的贝斯、鼓和其他乐器。",
+                    systemImage: "waveform.badge.minus"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
             } else if appModel.selectedSource.kind != .microphone {
                 Label(
                     "KTV 需要麦克风。请先在工具栏选择一个麦克风音源。",

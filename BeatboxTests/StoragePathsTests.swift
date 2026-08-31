@@ -41,6 +41,8 @@ struct StoragePathsTests {
             == "36EB18BE-8093-4B2E-AE8B-BE5912EA6ED6.lrc")
         #expect(paths.karaokeStagingURL(for: id).deletingLastPathComponent()
             == paths.karaokeStagingURL)
+        #expect(paths.karaokeVocalReductionURL(for: id).deletingLastPathComponent()
+            == paths.karaokeDerivedURL)
     }
 
     @Test
